@@ -286,14 +286,14 @@ class TestOutputDirOption(unittest.TestCase):
         """Every download targets the custom directory; default folder untouched."""
         dest_dirs: list[Path] = []
 
-        def fake_download(url, dest_dir, position=0, total=0, title=""):
+        def fake_download(url, dest_dir, position=0, total=0, title=""):  # pylint: disable=unused-argument
             dest_dirs.append(Path(dest_dir))
             return (Format.JPEG, 1024)
 
         with patch.object(swb, "fetch_article_html", return_value=FIXTURE_HTML):
             with patch.object(swb, "download_image", side_effect=fake_download):
                 with patch.object(swb, "resolve_output_root") as mock_default:
-                    code, stdout, _ = self._run_main(
+                    code, _, _ = self._run_main(
                         ["--output-dir", str(self.custom_dir)]
                     )
 
@@ -552,7 +552,7 @@ class TestHelpPrecedence(unittest.TestCase):
         """Unrecognized option errors even when --help is present."""
         for argv in (["--bogus", "--help"], ["--help", "--bogus"]):
             with self.subTest(argv=argv):
-                code, stdout, stderr = self._run_main(argv)
+                code, _, stderr = self._run_main(argv)
 
             self.assertEqual(code, 2)
             self.assertIn("--bogus", stderr)
