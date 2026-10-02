@@ -1,6 +1,6 @@
 # Star Wars Backgrounds Downloader
 
-Downloads all background images from the [StarWars.com backgrounds article](https://www.starwars.com/news/star-wars-backgrounds) into `<Pictures>/StarWarsBackground`.
+Downloads all background images from the [StarWars.com backgrounds article](https://www.starwars.com/news/star-wars-backgrounds) into `<Pictures>/StarWarsBackground` (or any directory of your choice with `--output-dir`).
 
 ## Prerequisites
 
@@ -32,6 +32,7 @@ Progress is printed per item: `[i/N] <title> -> <path> (<bytes>)`, followed by a
 
 | Flag | Description |
 |------|-------------|
+| `--output-dir <path>` | Directory where images are saved. Relative paths resolve against the current working directory; missing directories (including parents) are created automatically. Blank values are rejected with a usage error. Default: `<Pictures>/StarWarsBackground`. |
 | `--overwrite` | Re-download and replace files that already exist (default: skip existing files). |
 
 ### Output naming

@@ -20,6 +20,8 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver as Chrome
 
+__version__ = "1.1.0"
+
 ARTICLE_URL = "https://www.starwars.com/news/star-wars-backgrounds"
 LUMIERE_CDN_PREFIX = "https://lumiere-a.akamaihd.net/v1/images/"
 CONNECT_TIMEOUT = 30
@@ -109,6 +111,58 @@ def resolve_output_root() -> Path:
     output_root = pictures / "StarWarsBackground"
     output_root.mkdir(parents=True, exist_ok=True)
     return output_root
+
+
+class OutputDirectoryError(Exception):
+    """Raised when a user-provided output directory is unusable."""
+
+
+def resolve_output_dir(cli_value: str | None = None) -> Path:
+    """Resolve and validate the effective output directory.
+
+    When cli_value is None (no --output-dir given), falls back to the
+    default <Pictures>/StarWarsBackground folder unchanged. Otherwise:
+      - expand ~, resolve relative values against the current working
+        directory, normalize to an absolute path;
+      - create missing directories including parents;
+      - raise OutputDirectoryError if the value names an existing file
+        or the directory cannot be created.
+
+    Args:
+        cli_value: Raw --output-dir value, or None when absent.
+
+    Returns:
+        Absolute Path to the effective output directory (created).
+
+    Raises:
+        OutputDirectoryError: If the target is unusable; message names
+            the offending path and reason per contracts/cli.md.
+    """
+    if cli_value is None:
+        return resolve_output_root()
+
+    target = Path(os.path.expanduser(cli_value))
+    if not target.is_absolute():
+        target = Path.cwd() / target
+
+    if target.exists() and not target.is_dir():
+        raise OutputDirectoryError(
+            f"{target}: not a directory — cannot use as output location"
+        )
+
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OutputDirectoryError(f"{target}: {e}") from e
+
+    return target
+
+
+def _output_dir_arg(value: str) -> str:
+    """argparse type for --output-dir; rejects blank values (exit 2)."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("must be a non-empty directory path")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -432,11 +486,24 @@ def main() -> int:
         action="store_true",
         help="Re-download and replace files that already exist.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=_output_dir_arg,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Directory where images are saved (created if missing; "
+            "default: <Pictures>/StarWarsBackground)."
+        ),
+    )
     args = parser.parse_args()
 
     # Resolve output directory
     try:
-        output_root = resolve_output_root()
+        output_root = resolve_output_dir(args.output_dir)
+    except OutputDirectoryError as e:
+        print(f"ERROR {e}", file=sys.stderr)
+        return 1
     except OSError as e:
         print(f"ERROR: Cannot create output directory: {e}", file=sys.stderr)
         return 1
