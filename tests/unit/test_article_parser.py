@@ -17,6 +17,7 @@ class TestParseGallery(unittest.TestCase):
         cls.items = parse_gallery(cls.html)
 
     def test_returns_list_of_background_images(self):
+        """parse_gallery returns a list of BackgroundImage items."""
         self.assertIsInstance(self.items, list)
         for item in self.items:
             self.assertIsInstance(item, BackgroundImage)
@@ -26,15 +27,18 @@ class TestParseGallery(unittest.TestCase):
         self.assertGreaterEqual(len(self.items), 50)
 
     def test_unique_source_urls(self):
+        """All source URLs are unique."""
         urls = [item.source_url for item in self.items]
         self.assertEqual(len(urls), len(set(urls)), "Duplicate source URLs found")
 
     def test_positions_sequential_1_based(self):
+        """Positions are sequential, starting at 1."""
         positions = [item.position for item in self.items]
         expected = list(range(1, len(self.items) + 1))
         self.assertEqual(positions, expected)
 
     def test_source_urls_are_lumiere_cdn_https(self):
+        """Every source URL is an HTTPS lumiere CDN URL."""
         for item in self.items:
             self.assertTrue(
                 item.source_url.startswith("https://lumiere-a.akamaihd.net/v1/images/"),
@@ -47,12 +51,16 @@ class TestParseGallery(unittest.TestCase):
             self.assertNotIn("?", item.source_url, f"Query string present: {item.source_url}")
 
     def test_titles_non_empty(self):
+        """Titles are non-empty after stripping whitespace."""
         for item in self.items:
             self.assertTrue(item.title.strip(), f"Empty title at position {item.position}")
 
     def test_title_fallback_for_empty_alt(self):
         """If alt is empty, title should fall back to background-<position>."""
-        html = '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/test_abc.jpeg" alt=""></figure>'
+        html = (
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/'
+            'test_abc.jpeg" alt=""></figure>'
+        )
         items = parse_gallery(html)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].title, "background-1")
@@ -60,8 +68,10 @@ class TestParseGallery(unittest.TestCase):
     def test_excludes_non_cdn_images(self):
         """Images not on lumiere CDN should be excluded."""
         html = (
-            '<figure><img src="https://other-cdn.com/image.png" alt="Not a background"></figure>'
-            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/valid_abc.jpeg" alt="Valid"></figure>'
+            '<figure><img src="https://other-cdn.com/image.png"'
+            ' alt="Not a background"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/'
+            'valid_abc.jpeg" alt="Valid"></figure>'
         )
         items = parse_gallery(html)
         self.assertEqual(len(items), 1)
@@ -70,8 +80,10 @@ class TestParseGallery(unittest.TestCase):
     def test_excludes_non_jpeg_cdn_images(self):
         """Only .jpeg URLs on lumiere CDN are backgrounds."""
         html = (
-            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/logo_abc.png" alt="Logo"></figure>'
-            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/bg_abc.jpeg" alt="BG"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/'
+            'logo_abc.png" alt="Logo"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/'
+            'bg_abc.jpeg" alt="BG"></figure>'
         )
         items = parse_gallery(html)
         self.assertEqual(len(items), 1)

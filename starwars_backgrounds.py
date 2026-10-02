@@ -17,6 +17,8 @@ from pathlib import Path
 import platformdirs
 import requests
 from bs4 import BeautifulSoup
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.webdriver import WebDriver as Chrome
 
 ARTICLE_URL = "https://www.starwars.com/news/star-wars-backgrounds"
 LUMIERE_CDN_PREFIX = "https://lumiere-a.akamaihd.net/v1/images/"
@@ -35,15 +37,20 @@ def _sleep(seconds: float) -> None:
 # ---------------------------------------------------------------------------
 
 class Format(Enum):
+    """Supported image formats."""
+
     JPEG = "jpeg"
     PNG = "png"
 
     @property
     def extension(self) -> str:
+        """File extension for this format (".jpg" or ".png")."""
         return ".jpg" if self is Format.JPEG else ".png"
 
 
 class ItemStatus(Enum):
+    """Outcome status of a processed item."""
+
     PENDING = "pending"
     SAVED = "saved"
     SKIPPED = "skipped"
@@ -162,9 +169,6 @@ def fetch_article_html() -> str:
     Raises:
         Exception: If the page cannot be reached after bounded retries.
     """
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -174,11 +178,11 @@ def fetch_article_html() -> str:
     for attempt in range(1, MAX_ATTEMPTS + 1):
         driver = None
         try:
-            driver = webdriver.Chrome(options=options)
+            driver = Chrome(options=options)
             driver.get(ARTICLE_URL)
             html = driver.page_source
             return html
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             last_error = e
         finally:
             if driver is not None:
@@ -387,7 +391,7 @@ def process_item(
         return ItemResult(image=item, status=ItemStatus.SKIPPED)
 
     try:
-        fmt, bytes_written = download_image(
+        _, bytes_written = download_image(
             item.source_url,
             output_root,
             position=item.position,
@@ -399,7 +403,7 @@ def process_item(
             status=ItemStatus.SAVED,
             bytes_downloaded=bytes_written,
         )
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         # Format stderr ERROR line per contracts/cli.md
         msg = str(e)
         if "attempt" in msg and "/3/" in msg:
@@ -440,7 +444,7 @@ def main() -> int:
     # Fetch article HTML (injectable for tests via module-level override)
     try:
         html = fetch_article_html()
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"ERROR [attempt 3/3] {ARTICLE_URL}: {e}", file=sys.stderr)
         return 1
 

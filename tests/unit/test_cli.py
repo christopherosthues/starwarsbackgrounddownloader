@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import starwars_backgrounds as swb
-from starwars_backgrounds import main
+from starwars_backgrounds import Format, derive_filename, main
 
 # Fixture HTML with one gallery image using a lumiere CDN URL
 FIXTURE_HTML = """\
@@ -26,7 +26,7 @@ class TestCLIExitCodes(unittest.TestCase):
     """Verify exit codes per contracts/cli.md."""
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(self._tmp.cleanup)
         self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
         self.output_dir.mkdir(parents=True)
@@ -61,7 +61,6 @@ class TestCLIExitCodes(unittest.TestCase):
 
     def test_exit_0_on_all_skipped(self):
         """Exit 0 when all items are skipped (already exist)."""
-        from starwars_backgrounds import derive_filename, Format
         filename = derive_filename(1, "Test BG", Format.JPEG)
         (self.output_dir / filename).write_bytes(b"existing")
 
@@ -88,7 +87,7 @@ class TestCLIExitCodes(unittest.TestCase):
     def test_exit_1_on_zero_backgrounds_found(self):
         """Exit 1 when the article contains no backgrounds."""
         with patch.object(swb, "fetch_article_html", return_value=EMPTY_HTML):
-            code, stdout, stderr = self._run_main([])
+            code, _, stderr = self._run_main([])
 
         self.assertEqual(code, 1)
         self.assertIn("ERROR", stderr)
@@ -100,7 +99,7 @@ class TestCLIExitCodes(unittest.TestCase):
             swb, "fetch_article_html",
             side_effect=RuntimeError("page unreachable"),
         ):
-            code, stdout, stderr = self._run_main([])
+            code, _, stderr = self._run_main([])
 
         self.assertEqual(code, 1)
         self.assertIn("ERROR", stderr)
@@ -108,7 +107,7 @@ class TestCLIExitCodes(unittest.TestCase):
     def test_exit_2_on_usage_error(self):
         """Exit 2 for unrecognized flags (argparse convention)."""
         with patch.object(swb, "fetch_article_html"):
-            code, stdout, stderr = self._run_main(["--nonexistent-flag"])
+            code, _, _ = self._run_main(["--nonexistent-flag"])
 
         self.assertEqual(code, 2)
 
@@ -136,20 +135,20 @@ class TestCLIExitCodes(unittest.TestCase):
                 swb, "download_image",
                 side_effect=RuntimeError(err_msg),
             ):
-                code, stdout, stderr = self._run_main([])
+                code, _, stderr = self._run_main([])
 
         self.assertEqual(code, 1)
-        error_lines = [l for l in stderr.splitlines() if l.startswith("ERROR")]
+        error_lines = [line for line in stderr.splitlines() if line.startswith("ERROR")]
         self.assertTrue(len(error_lines) >= 1, f"No ERROR lines: {stderr!r}")
         self.assertIn("test.jpeg", stderr)
 
     def test_stderr_error_line_format_zero_found(self):
         """Zero backgrounds found produces an ERROR line on stderr."""
         with patch.object(swb, "fetch_article_html", return_value=EMPTY_HTML):
-            code, stdout, stderr = self._run_main([])
+            code, _, stderr = self._run_main([])
 
         self.assertEqual(code, 1)
-        error_lines = [l for l in stderr.splitlines() if l.startswith("ERROR")]
+        error_lines = [line for line in stderr.splitlines() if line.startswith("ERROR")]
         self.assertTrue(len(error_lines) >= 1, f"No ERROR lines: {stderr!r}")
 
     def test_nonzero_exit_always_has_error_line(self):
@@ -194,7 +193,10 @@ class TestCLIExitCodes(unittest.TestCase):
                     code = e.code if isinstance(e.code, int) else 1
 
                 self.assertEqual(code, 1)
-                error_lines = [l for l in stderr_buf.getvalue().splitlines() if l.startswith("ERROR")]
+                error_lines = [
+                    line for line in stderr_buf.getvalue().splitlines()
+                    if line.startswith("ERROR")
+                ]
                 self.assertTrue(
                     len(error_lines) >= 1,
                     f"Non-zero exit {code} without ERROR line. stderr={stderr_buf.getvalue()!r}",

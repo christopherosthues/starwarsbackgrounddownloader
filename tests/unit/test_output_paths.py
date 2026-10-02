@@ -1,9 +1,7 @@
 """Tests for idempotent re-runs and --overwrite behavior (US2)."""
 
 import tempfile
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from starwars_backgrounds import (
@@ -13,51 +11,7 @@ from starwars_backgrounds import (
     derive_filename,
     process_item,
 )
-
-# Minimal valid JPEG bytes for stub server
-JPEG_BYTES = bytes.fromhex(
-    "ffd8ffe000104a464946000101000001000000010000"
-    "00ffdb00430008060607060508070708090908080a0c"
-    "0d0c0b0e0f0c0e0e0f1211111111111111111111111111"
-    "1111111111111111111111111111111111110109090a0c"
-    "0a0b0d0d0e0f121113131211121415151414151718191a"
-    "1a1a191a1c1e2020201a1c1e2020202020202020202020"
-    "ffc0000b08000100010101110000ffda000c0100021100"
-    "003f00fbfa2e451101ffd9"
-)
-
-
-class _StubHandler(BaseHTTPRequestHandler):
-    server: "_StubServer"
-
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(len(JPEG_BYTES)))
-        self.end_headers()
-        self.wfile.write(JPEG_BYTES)
-
-    def log_message(self, format, *args):
-        pass
-
-
-class _StubServer:
-    @classmethod
-    def start(cls) -> "_StubServer":
-        server = cls()
-        httpd = HTTPServer(("127.0.0.1", 0), _StubHandler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        server.httpd = httpd
-        server.port = httpd.server_address[1]
-        return server
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
-
-    def stop(self):
-        self.httpd.shutdown()
+from tests.unit.stub_server import JPEG_BYTES, StubServer
 
 
 class TestIdempotency(unittest.TestCase):
@@ -65,14 +19,14 @@ class TestIdempotency(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.server = _StubServer.start()
+        cls.server = StubServer.start()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.stop()
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(self._tmp.cleanup)
         self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
         self.output_dir.mkdir(parents=True)
