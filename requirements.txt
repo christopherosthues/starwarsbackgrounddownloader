@@ -1,0 +1,4 @@
+selenium==4.50.0
+beautifulsoup4==4.15.0
+requests==2.34.2
+platformdirs==4.12.2
