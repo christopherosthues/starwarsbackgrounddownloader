@@ -32,6 +32,7 @@ Progress is printed per item: `[i/N] <title> -> <path> (<bytes>)`, followed by a
 
 | Flag | Description |
 |------|-------------|
+| `-h`, `--help` | Display comprehensive usage information on stdout and exit 0 without downloading anything, creating directories, or making network requests. Invalid values or unrecognized options still produce a usage error (exit code 2). |
 | `--output-dir <path>` | Directory where images are saved. Relative paths resolve against the current working directory; missing directories (including parents) are created automatically. Blank values are rejected with a usage error. Default: `<Pictures>/StarWarsBackground`. |
 | `--overwrite` | Re-download and replace files that already exist (default: skip existing files). |
 

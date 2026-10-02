@@ -384,5 +384,179 @@ class TestOutputDirErrors(unittest.TestCase):
         self.assertTrue(len(error_lines) >= 1, f"No ERROR lines: {stderr!r}")
 
 
+class TestHelpFlag(unittest.TestCase):
+    """US1/US2/US3: -h/--help displays comprehensive usage information."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_root = Path(self._tmp.name)
+
+    def _run_main(
+        self, argv: list[str]
+    ) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(
+                swb, "fetch_article_html",
+                side_effect=AssertionError("network attempted"),
+            ):
+                with patch.object(
+                    swb, "resolve_output_root",
+                    return_value=self.tmp_root / "StarWarsBackground",
+                ):
+                    with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                        with patch("sys.stdout", stdout_buf):
+                            with patch("sys.stderr", stderr_buf):
+                                code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_help_exit_0_with_comprehensive_output(self):
+        """--help exits 0 and prints description, all options with defaults."""
+        code, stdout, stderr = self._run_main(["--help"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        lower = stdout.lower()
+        # One-line description of what the tool does (FR-002a)
+        self.assertIn("star wars", lower)
+        self.assertIn("download", lower)
+        # Every public option is documented (FR-002b)
+        for flag in ("--help", "-h", "--overwrite", "--output-dir"):
+            self.assertIn(flag, stdout)
+
+    def test_help_documents_defaults_matching_runtime(self):
+        """Documented defaults match runtime defaults (FR-005)."""
+        code, stdout, _ = self._run_main(["--help"])
+
+        self.assertEqual(code, 0)
+        # Default output location is documented
+        self.assertIn("<Pictures>/StarWarsBackground", stdout)
+        # Overwrite-off-by-default is documented on the --overwrite line
+        overwrite_lines = [
+            line for line in stdout.splitlines() if "--overwrite" in line
+        ]
+        self.assertTrue(overwrite_lines, "No --overwrite documentation found")
+        self.assertIn("default", " ".join(overwrite_lines).lower())
+
+    def test_help_includes_example_per_behavior(self):
+        """At least one example invocation per supported behavior (FR-002c)."""
+        code, stdout, _ = self._run_main(["--help"])
+
+        self.assertEqual(code, 0)
+        example_lines = [
+            line.strip()
+            for line in stdout.splitlines()
+            if "starwars_backgrounds.py" in line
+            and not line.lstrip().startswith("Usage")
+        ]
+        default_runs = [l for l in example_lines if "--" not in l]
+        self.assertTrue(default_runs, "No default-run example found")
+        custom_dir_examples = [l for l in example_lines if "--output-dir" in l]
+        self.assertTrue(custom_dir_examples, "No custom-directory example found")
+        overwrite_examples = [l for l in example_lines if "--overwrite" in l]
+        self.assertTrue(
+            overwrite_examples, "No forced re-download example found"
+        )
+
+    def test_help_performs_no_side_effects(self):
+        """--help exits 0 without network requests or filesystem writes."""
+        with patch.object(swb, "resolve_output_root") as mock_resolve:
+            code, _, stderr = self._run_main(["--help"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        mock_resolve.assert_not_called()
+        # No files or directories created anywhere under the temp root
+        self.assertEqual(list(self.tmp_root.iterdir()), [])
+
+    def test_help_output_is_ascii_only(self):
+        """Help text is plain ASCII (clarification Q1; FR-006 edge case)."""
+        code, stdout, _ = self._run_main(["--help"])
+
+        self.assertEqual(code, 0)
+        non_ascii = [c for c in stdout if ord(c) >= 128]
+        self.assertEqual(non_ascii, [], "Help output must be ASCII-only")
+
+    def test_short_form_identical_to_long_form(self):
+        """-h produces byte-identical stdout and exit status to --help."""
+        code_long, out_long, err_long = self._run_main(["--help"])
+        code_short, out_short, err_short = self._run_main(["-h"])
+
+        self.assertEqual(code_long, 0)
+        self.assertEqual(code_short, 0)
+        self.assertEqual(out_short, out_long)
+        self.assertEqual(err_long, "")
+        self.assertEqual(err_short, "")
+
+
+class TestHelpPrecedence(unittest.TestCase):
+    """US3: help wins over valid options; invalid input still errors."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_root = Path(self._tmp.name)
+
+    def _run_main(
+        self, argv: list[str]
+    ) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(
+                swb, "fetch_article_html",
+                side_effect=AssertionError("network attempted"),
+            ):
+                with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                    with patch("sys.stdout", stdout_buf):
+                        with patch("sys.stderr", stderr_buf):
+                            code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_help_wins_over_valid_options(self):
+        """--help combined with valid options prints help and exits 0."""
+        target = str(self.tmp_root / "custom")
+        for argv in (
+            ["--help", "--overwrite", "--output-dir", target],
+            ["--overwrite", "--output-dir", target, "--help"],
+        ):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = self._run_main(argv)
+
+            self.assertEqual(code, 0)
+            self.assertIn("--output-dir", stdout)
+            self.assertEqual(stderr, "")
+        # No directory created and no download started (SC-003)
+        self.assertFalse(Path(target).exists())
+
+    def test_blank_value_precedes_help(self):
+        """Blank --output-dir value errors even when --help is present."""
+        for argv in (["--output-dir", "", "--help"], ["--help", "--output-dir", ""]):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = self._run_main(argv)
+
+            self.assertEqual(code, 2)
+            self.assertIn("--output-dir", stderr)
+            # No help text displayed on usage errors (argparse writes to stderr)
+            self.assertEqual(stdout, "")
+
+    def test_unrecognized_option_precedes_help(self):
+        """Unrecognized option errors even when --help is present."""
+        for argv in (["--bogus", "--help"], ["--help", "--bogus"]):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = self._run_main(argv)
+
+            self.assertEqual(code, 2)
+            self.assertIn("--bogus", stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

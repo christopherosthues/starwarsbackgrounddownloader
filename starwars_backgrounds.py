@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.webdriver import WebDriver as Chrome
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 ARTICLE_URL = "https://www.starwars.com/news/star-wars-backgrounds"
 LUMIERE_CDN_PREFIX = "https://lumiere-a.akamaihd.net/v1/images/"
@@ -476,10 +476,35 @@ def process_item(
 # T012: Main CLI entry point and progress reporting (contracts/cli.md)
 # ---------------------------------------------------------------------------
 
+HELP_TEXT = """\
+Star Wars Backgrounds Downloader
+Downloads all Star Wars background images from the StarWars.com article gallery.
+
+Usage: python starwars_backgrounds.py [options]
+
+Options:
+  -h, --help            Show this help information and exit without downloading anything.
+  --overwrite           Re-download and replace files that already exist (default: off).
+  --output-dir DIR      Directory where images are saved; created if missing
+                        (default: <Pictures>/StarWarsBackground).
+
+Examples:
+  python starwars_backgrounds.py
+  python starwars_backgrounds.py --output-dir bg
+  python starwars_backgrounds.py --overwrite
+"""
+
+
 def main() -> int:
     """CLI entry point. Returns exit code (0=success, 1=failure)."""
     parser = argparse.ArgumentParser(
-        description="Download all Star Wars backgrounds from the StarWars.com article."
+        description="Download all Star Wars backgrounds from the StarWars.com article.",
+        add_help=False,
+    )
+    parser.add_argument(
+        "-h", "--help",
+        action="store_true",
+        help="Show this help information and exit without downloading anything.",
     )
     parser.add_argument(
         "--overwrite",
@@ -497,6 +522,12 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+
+    # Help takes precedence over all other behavior (FR-001, FR-004):
+    # print curated usage and exit before any resolution or fetch setup.
+    if args.help:
+        sys.stdout.write(HELP_TEXT)
+        return 0
 
     # Resolve output directory
     try:
