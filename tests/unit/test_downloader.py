@@ -121,8 +121,8 @@ class TestRetryBehavior(unittest.TestCase):
 
         # Verify exactly 3 requests were made
         self.assertEqual(self.server.request_counts.get("/retry-fail.jpeg"), 3)
-        # Backoff: sleep called twice (after attempt 1 and 2), with 1s then 2s
-        self.assertEqual(sleep_calls, [1.0, 2.0])
+        # Backoff (1s, 2s) additive with the default throttle delay of 0.2s (R6)
+        self.assertEqual(sleep_calls, [1.2, 2.2])
 
     def test_retry_succeeds_on_third_attempt(self):
         """If server recovers on attempt 3, download succeeds."""
@@ -212,6 +212,51 @@ class TestErrorMessages(unittest.TestCase):
                 msg = str(e)
                 # Must include the URL
                 self.assertIn("/format-err.jpeg", msg)
+
+
+class TestDelayThrottling(unittest.TestCase):
+    """T016/T017: --delay throttle applied per request, additive to backoff (R6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = StubServer.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.dest_dir = Path(self._tmp.name) / "output"
+        self.dest_dir.mkdir(parents=True)
+
+    def test_delay_additive_to_backoff_on_retry(self):
+        """Each failed attempt pauses for backoff + delay (research.md R6)."""
+        url = f"{self.server.base_url}/delay-fail.jpeg"
+        self.server.fail_paths.add("/delay-fail.jpeg")
+
+        sleep_calls: list[float] = []
+        with patch.object(swb, "_sleep", side_effect=sleep_calls.append):
+            try:
+                download_image(url, self.dest_dir, delay_seconds=2.0)
+                self.fail("Expected exception after retry exhaustion")
+            except RuntimeError:
+                pass
+
+        # Backoff (1s, 2s) additive with the explicit 2.0s delay per pause.
+        self.assertEqual(sleep_calls, [3.0, 4.0])
+
+    def test_successful_download_performs_no_throttle_sleep(self):
+        """A first-attempt success issues no throttle sleep from download_image."""
+        url = f"{self.server.base_url}/delay-ok.jpeg"
+
+        sleep_calls: list[float] = []
+        with patch.object(swb, "_sleep", side_effect=sleep_calls.append):
+            fmt, _ = download_image(url, self.dest_dir, delay_seconds=0.5)
+
+        self.assertEqual(fmt, Format.JPEG)
+        self.assertEqual(sleep_calls, [])
 
 
 if __name__ == "__main__":

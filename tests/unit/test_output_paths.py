@@ -2,10 +2,12 @@
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import starwars_backgrounds as swb
 from starwars_backgrounds import (
     BackgroundImage,
     Format,
@@ -274,6 +276,117 @@ class TestOutputDirValidation(unittest.TestCase):
 
         self.assertIn(str(blocker), str(ctx.exception))
         self.assertIn("not a directory", str(ctx.exception))
+
+
+class TestStagingLifecycle(unittest.TestCase):
+    """US3 (T009): staging directory lifecycle per research.md R1."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_root = Path(self._tmp.name)
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_staging_path_format(self, mock_gettempdir):
+        """Per-run path is <Temp>/swbdl/<YYYYMMDD-HHMMSS>."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+
+        staged = swb.create_staging_dir()
+
+        self.assertTrue(staged.exists())
+        # Path ends with /swbdl/YYYYMMDD-HHMMSS
+        parts = staged.parts
+        self.assertIn("swbdl", parts)
+        name = staged.name
+        self.assertRegex(name, r"^\d{8}-\d{6}$")
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_stale_subfolder_deleted_before_creation(self, mock_gettempdir):
+        """A stale subfolder (old mtime) is deleted before the fresh one."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+        stale = self.tmp_root / "swbdl" / "old-run"
+        stale.mkdir(parents=True)
+        (stale / "leftover.jpg").write_bytes(b"data")
+        # Age the subfolder beyond STALE_STAGING_AGE_SECONDS.
+        old_ts = time.time() - swb.STALE_STAGING_AGE_SECONDS - 60
+        os.utime(stale, (old_ts, old_ts))
+
+        staged = swb.create_staging_dir()
+
+        self.assertTrue(staged.exists())
+        # The stale run is gone; only the new one exists
+        children = list((self.tmp_root / "swbdl").iterdir())
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0], staged)
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_fresh_subfolder_survives_startup_cleanup(self, mock_gettempdir):
+        """A fresh subfolder (concurrent run) is NOT deleted at start."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+        concurrent = self.tmp_root / "swbdl" / "other-run"
+        concurrent.mkdir(parents=True)
+        (concurrent / "in-flight.jpg").write_bytes(b"data")
+
+        staged = swb.create_staging_dir()
+
+        self.assertTrue(staged.exists())
+        self.assertNotEqual(staged, concurrent)
+        # The other run's folder and its files are untouched.
+        self.assertTrue((concurrent / "in-flight.jpg").exists())
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_cleanup_deletes_swbdl(self, mock_gettempdir):
+        """cleanup_staging deletes the run's subfolder and empty <Temp>/swbdl."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+        staged = swb.create_staging_dir()
+        (staged / "file.jpg").write_bytes(b"data")
+
+        swb.cleanup_staging(staged)
+
+        self.assertFalse((self.tmp_root / "swbdl").exists())
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_cleanup_keeps_concurrent_run_folder(self, mock_gettempdir):
+        """cleanup_staging removes only this run's subfolder."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+        staged = swb.create_staging_dir()
+        (staged / "file.jpg").write_bytes(b"data")
+        concurrent = self.tmp_root / "swbdl" / "other-run"
+        concurrent.mkdir()
+        (concurrent / "in-flight.jpg").write_bytes(b"data")
+
+        swb.cleanup_staging(staged)
+
+        # This run's folder is gone; the other run's folder and root remain.
+        self.assertFalse(staged.exists())
+        children = list((self.tmp_root / "swbdl").iterdir())
+        self.assertEqual(children, [concurrent])
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_cleanup_on_missing_swbdl_is_idempotent(self, mock_gettempdir):
+        """cleanup_staging is safe when <Temp>/swbdl does not exist."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+
+        swb.cleanup_staging(self.tmp_root / "swbdl" / "no-such-run")  # no exception
+
+    @patch("starwars_backgrounds.tempfile.gettempdir")
+    def test_collision_counter_suffix(self, mock_gettempdir):
+        """When <YYYYMMDD-HHMMSS> already exists, a counter suffix is appended."""
+        mock_gettempdir.return_value = str(self.tmp_root)
+
+        frozen = "20261105-120000"
+        # Pre-create the swbdl dir with a fresh subfolder matching the frozen
+        # datetime (fresh mtime means it survives startup cleanup).
+        pre_existing = self.tmp_root / "swbdl" / frozen
+        pre_existing.mkdir(parents=True)
+
+        with patch("starwars_backgrounds.datetime") as mock_dt:
+            mock_dt.now.return_value.strftime.return_value = frozen
+            staged = swb.create_staging_dir()
+
+        self.assertTrue(staged.exists())
+        self.assertNotEqual(staged.name, frozen)
+        self.assertTrue(staged.name.startswith(frozen))
 
 
 if __name__ == "__main__":

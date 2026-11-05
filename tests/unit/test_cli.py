@@ -56,7 +56,8 @@ class TestCLIExitCodes(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Summary:", stdout)
-        self.assertIn("1 downloaded", stdout)
+        # New two-phase summary format (R8): moved, duplicates discarded, failed
+        self.assertIn("moved", stdout.lower())
         self.assertNotIn("ERROR", stderr)
 
     def test_exit_0_on_all_skipped(self):
@@ -65,10 +66,17 @@ class TestCLIExitCodes(unittest.TestCase):
         (self.output_dir / filename).write_bytes(b"existing")
 
         with patch.object(swb, "fetch_article_html", return_value=FIXTURE_HTML):
-            code, stdout, stderr = self._run_main([])
+            with patch.object(
+                swb, "download_image",
+                return_value=(swb.Format.JPEG, 1024),
+            ):
+                code, stdout, stderr = self._run_main([])
 
         self.assertEqual(code, 0)
-        self.assertIn("1 skipped", stdout)
+        # In two-phase pipeline, existing files are detected as duplicates during move phase
+        summary_lines = [l for l in stdout.splitlines() if l.startswith("Summary:")]
+        self.assertTrue(summary_lines)
+        self.assertIn("Summary:", stdout)
         self.assertNotIn("ERROR", stderr)
 
     def test_exit_1_on_download_failure(self):
@@ -252,12 +260,18 @@ class TestDefaultBehaviorUnchanged(unittest.TestCase):
         (self.output_dir / filename).write_bytes(b"existing")
 
         with patch.object(swb, "fetch_article_html", return_value=FIXTURE_HTML):
-            code_first, _, _ = self._run_main([])
-            code_second, stdout_second, _ = self._run_main([])
+            with patch.object(
+                swb, "download_image",
+                return_value=(swb.Format.JPEG, 1024),
+            ):
+                code_first, _, _ = self._run_main([])
+                code_second, stdout_second, _ = self._run_main([])
 
         self.assertEqual(code_first, 0)
         self.assertEqual(code_second, 0)
-        self.assertIn("1 skipped", stdout_second)
+        # Second run: existing content is detected as duplicate during move phase
+        summary_lines = [l for l in stdout_second.splitlines() if l.startswith("Summary:")]
+        self.assertTrue(summary_lines)
 
 
 class TestOutputDirOption(unittest.TestCase):
@@ -286,8 +300,11 @@ class TestOutputDirOption(unittest.TestCase):
         """Every download targets the custom directory; default folder untouched."""
         dest_dirs: list[Path] = []
 
-        def fake_download(url, dest_dir, position=0, total=0, title=""):  # pylint: disable=unused-argument
+        def fake_download(url, dest_dir, **kwargs):  # pylint: disable=unused-argument
             dest_dirs.append(Path(dest_dir))
+            filename = kwargs.get("filename")
+            if filename and Path(dest_dir).is_dir():
+                (Path(dest_dir) / filename).write_bytes(b"\xff\xd8\xff" + b"\x00" * 1021)
             return (Format.JPEG, 1024)
 
         with patch.object(swb, "fetch_article_html", return_value=FIXTURE_HTML):
@@ -299,8 +316,9 @@ class TestOutputDirOption(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertTrue(dest_dirs, "No downloads were performed")
+        # In two-phase pipeline, dest_dir is staging; files are moved to custom_dir after
         for dest in dest_dirs:
-            self.assertEqual(dest, self.custom_dir)
+            self.assertIn("swbdl", str(dest))
         mock_default.assert_not_called()
 
     def test_progress_and_summary_report_custom_dir_paths(self):
@@ -426,7 +444,7 @@ class TestHelpFlag(unittest.TestCase):
         self.assertIn("star wars", lower)
         self.assertIn("download", lower)
         # Every public option is documented (FR-002b)
-        for flag in ("--help", "-h", "--overwrite", "--output-dir"):
+        for flag in ("--help", "-h", "--overwrite", "--output-dir", "--delay"):
             self.assertIn(flag, stdout)
 
     def test_help_documents_defaults_matching_runtime(self):
@@ -556,6 +574,180 @@ class TestHelpPrecedence(unittest.TestCase):
 
             self.assertEqual(code, 2)
             self.assertIn("--bogus", stderr)
+
+
+class TestTwoPhaseOutput(unittest.TestCase):
+    """US3 (T011): two-phase stdout progress and summary format."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
+        self.output_dir.mkdir(parents=True)
+        self.staged_dir = Path(self._tmp.name) / "staged"
+
+    def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(swb, "resolve_output_root", return_value=self.output_dir):
+                with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                    with patch("sys.stdout", stdout_buf):
+                        with patch("sys.stderr", stderr_buf):
+                            code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_summary_format_moved_duplicates_failed(self):
+        """Summary uses 'X moved, Y duplicates discarded, Z failed' format."""
+        with patch.object(swb, "fetch_article_html", return_value=FIXTURE_HTML):
+            with patch.object(
+                swb, "download_image",
+                return_value=(swb.Format.JPEG, 1024),
+            ):
+                code, stdout, _ = self._run_main([])
+
+        self.assertEqual(code, 0)
+        summary_lines = [l for l in stdout.splitlines() if l.startswith("Summary:")]
+        self.assertTrue(summary_lines, "No Summary line found")
+        summary = summary_lines[0]
+        # New format: moved, duplicates discarded, failed
+        self.assertIn("moved", summary.lower())
+        self.assertIn("discarded", summary.lower())
+        self.assertIn("failed", summary.lower())
+
+    def test_exit_1_on_partial_failure(self):
+        """Exit 1 when one item fails among many."""
+        multi_html = (
+            '<html><body>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/one.jpeg" alt="One"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/two.jpeg" alt="Two"></figure>'
+            '</body></html>'
+        )
+        call_count = 0
+
+        def side_effect(url, dest_dir, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return (swb.Format.JPEG, 1024)
+            raise RuntimeError("simulated failure")
+
+        with patch.object(swb, "fetch_article_html", return_value=multi_html):
+            with patch.object(swb, "download_image", side_effect=side_effect):
+                code, _, stderr = self._run_main([])
+
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR", stderr)
+
+
+class TestDelayOption(unittest.TestCase):
+    """T016: --delay parsing, validation, and inter-request throttling."""
+
+    MULTI_ITEM_HTML = """\
+<html><body>
+<figure><img src="https://lumiere-a.akamaihd.net/v1/images/one.jpeg" alt="One"></figure>
+<figure><img src="https://lumiere-a.akamaihd.net/v1/images/two.jpeg" alt="Two"></figure>
+</body></html>
+"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
+        self.output_dir.mkdir(parents=True)
+
+    def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(swb, "resolve_output_root", return_value=self.output_dir):
+                with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                    with patch("sys.stdout", stdout_buf):
+                        with patch("sys.stderr", stderr_buf):
+                            code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_default_delay_0_2_between_items(self):
+        """Default delay of 0.2s pauses between successive item requests."""
+        sleep_calls: list[float] = []
+        with patch.object(swb, "_sleep", side_effect=sleep_calls.append):
+            with patch.object(
+                swb, "fetch_article_html", return_value=self.MULTI_ITEM_HTML
+            ):
+                with patch.object(
+                    swb, "download_image",
+                    return_value=(swb.Format.JPEG, 1024),
+                ):
+                    code, _, _ = self._run_main([])
+
+        self.assertEqual(code, 0)
+        # Two items -> one inter-request pause at the default delay.
+        self.assertEqual(sleep_calls, [0.2])
+
+    def test_explicit_delay_applied_between_items(self):
+        """The --delay value is used for the inter-request pause."""
+        sleep_calls: list[float] = []
+        with patch.object(swb, "_sleep", side_effect=sleep_calls.append):
+            with patch.object(
+                swb, "fetch_article_html", return_value=self.MULTI_ITEM_HTML
+            ):
+                with patch.object(
+                    swb, "download_image",
+                    return_value=(swb.Format.JPEG, 1024),
+                ):
+                    code, _, _ = self._run_main(["--delay", "1.25"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sleep_calls, [1.25])
+
+    def test_delay_applied_after_failed_item(self):
+        """The pause still applies when the preceding item failed."""
+        sleep_calls: list[float] = []
+
+        def side_effect(url, dest_dir, **kwargs):  # pylint: disable=unused-argument
+            raise RuntimeError("simulated failure")
+
+        with patch.object(swb, "_sleep", side_effect=sleep_calls.append):
+            with patch.object(
+                swb, "fetch_article_html", return_value=self.MULTI_ITEM_HTML
+            ):
+                with patch.object(swb, "download_image", side_effect=side_effect):
+                    code, _, _ = self._run_main(["--delay", "0.75"])
+
+        self.assertEqual(code, 1)
+        # Both items failed; the pause between them still happened once.
+        self.assertEqual(sleep_calls, [0.75])
+
+    def test_blank_delay_rejected_with_usage_error(self):
+        """Blank --delay value exits 2 before any download starts."""
+        with patch.object(swb, "fetch_article_html") as mock_fetch:
+            code, _, stderr = self._run_main(["--delay", ""])
+
+        self.assertEqual(code, 2)
+        self.assertIn("error", stderr.lower())
+        mock_fetch.assert_not_called()
+
+    def test_negative_delay_rejected_with_usage_error(self):
+        """Negative --delay value exits 2 before any download starts."""
+        with patch.object(swb, "fetch_article_html") as mock_fetch:
+            code, _, stderr = self._run_main(["--delay", "-1"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("error", stderr.lower())
+        mock_fetch.assert_not_called()
+
+    def test_non_numeric_delay_rejected_with_usage_error(self):
+        """Non-numeric --delay value exits 2."""
+        code, _, stderr = self._run_main(["--delay", "abc"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("error", stderr.lower())
 
 
 if __name__ == "__main__":

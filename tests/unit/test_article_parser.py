@@ -3,7 +3,13 @@
 import unittest
 from pathlib import Path
 
-from starwars_backgrounds import BackgroundImage, parse_gallery
+from starwars_backgrounds import (
+    BackgroundImage,
+    Format,
+    derive_filename,
+    derive_filename_from_url,
+    parse_gallery,
+)
 
 FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "article.html"
 
@@ -88,6 +94,74 @@ class TestParseGallery(unittest.TestCase):
         items = parse_gallery(html)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].title, "BG")
+
+
+class TestUrlDerivedNaming(unittest.TestCase):
+    """US2 (feature 004 T007): file names derived from the source URL base name."""
+
+    def test_basename_of_url_path_is_used(self):
+        """Base name is the basename of urlparse(source_url).path."""
+        url = "https://lumiere-a.akamaihd.net/v1/images/tatooine_abc.jpeg"
+        self.assertEqual(
+            derive_filename_from_url(url, Format.JPEG),
+            "tatooine_abc.jpg",
+        )
+
+    def test_query_and_fragment_stripped(self):
+        """Query strings and fragments do not affect the derived name."""
+        plain = "https://lumiere-a.akamaihd.net/v1/images/tatooine_abc.jpeg"
+        decorated = (
+            "https://lumiere-a.akamaihd.net/v1/images/tatooine_abc.jpeg"
+            "?width=1920#gallery-7"
+        )
+        self.assertEqual(
+            derive_filename_from_url(decorated, Format.JPEG),
+            derive_filename_from_url(plain, Format.JPEG),
+        )
+
+    def test_extension_matches_detected_format(self):
+        """The on-disk extension is the detected format's, not the URL's."""
+        url = "https://lumiere-a.akamaihd.net/v1/images/tatooine_abc.jpeg"
+        self.assertEqual(
+            derive_filename_from_url(url, Format.PNG),
+            "tatooine_abc.png",
+        )
+
+    def test_empty_path_falls_back_to_position_title(self):
+        """A URL path with no base name falls back to <NNN>-<title> derivation."""
+        url = "https://lumiere-a.akamaihd.net/v1/images/"
+        self.assertEqual(
+            derive_filename_from_url(url, Format.JPEG, position=7, title="Tatooine"),
+            derive_filename(7, "Tatooine", Format.JPEG),
+        )
+
+    def test_extension_less_path_falls_back(self):
+        """A base name without an extension falls back to <NNN>-<title>."""
+        url = "https://lumiere-a.akamaihd.net/v1/images/noext"
+        self.assertEqual(
+            derive_filename_from_url(url, Format.PNG, position=3, title="Hoth"),
+            derive_filename(3, "Hoth", Format.PNG),
+        )
+
+    def test_windows_illegal_characters_replaced(self):
+        """<>:"\\|?* and control characters are replaced with '-'."""
+        url = r'https://lumiere-a.akamaihd.net/v1/images/a<b>c"d|e\f*g.jpeg'
+        self.assertEqual(
+            derive_filename_from_url(url, Format.JPEG),
+            "a-b-c-d-e-f-g.jpg",
+        )
+
+    def test_control_characters_replaced(self):
+        """ASCII control characters in the base name are replaced with '-'."""
+        url = "https://lumiere-a.akamaihd.net/v1/images/a\x01b.jpeg"
+        self.assertEqual(derive_filename_from_url(url, Format.JPEG), "a-b.jpg")
+
+    def test_trailing_dots_and_spaces_stripped(self):
+        """Trailing dots and spaces in the base name are stripped."""
+        dotted = "https://lumiere-a.akamaihd.net/v1/images/tatooine...jpeg"
+        self.assertEqual(derive_filename_from_url(dotted, Format.JPEG), "tatooine.jpg")
+        spaced = "https://lumiere-a.akamaihd.net/v1/images/tatooine .jpeg"
+        self.assertEqual(derive_filename_from_url(spaced, Format.JPEG), "tatooine.jpg")
 
 
 if __name__ == "__main__":
