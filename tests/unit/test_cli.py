@@ -394,7 +394,9 @@ class TestOutputDirErrors(unittest.TestCase):
         """A creation failure (parent is a file) errors and exits 1."""
         blocker = self.tmp_root / "not-a-dir.txt"
         blocker.write_bytes(b"file")
-        target = str(blocker) + r"\nested"
+        # Join with the platform separator so this is a nested path on every OS
+        # (a literal backslash would only nest on Windows).
+        target = str(blocker / "nested")
 
         code, _, stderr = self._run_main(["--output-dir", target])
 
