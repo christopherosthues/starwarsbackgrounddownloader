@@ -39,9 +39,7 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
-# ---------------------------------------------------------------------------
-# T004: Data model entities (data-model.md)
-# ---------------------------------------------------------------------------
+# --- T004: Data model entities (data-model.md) ---
 
 class Format(Enum):
     """Supported image formats."""
@@ -99,9 +97,7 @@ class DownloadRun:
     exit_status: int = 0
 
 
-# ---------------------------------------------------------------------------
-# T005: Cross-platform Pictures directory resolution (research.md R4)
-# ---------------------------------------------------------------------------
+# --- T005: Cross-platform Pictures directory resolution (research.md R4) ---
 
 def resolve_output_root() -> Path:
     """Resolve <Pictures>/StarWarsBackground and create it if needed.
@@ -183,9 +179,7 @@ def _delay_arg(value: str) -> float:
     return seconds
 
 
-# ---------------------------------------------------------------------------
-# T006: Deterministic filename derivation (data-model.md naming rule)
-# ---------------------------------------------------------------------------
+# --- T006: Deterministic filename derivation (data-model.md naming rule) ---
 
 def derive_filename(position: int, title: str, fmt: Format) -> str:
     """Derive the deterministic file name for a background image.
@@ -265,9 +259,7 @@ def derive_filename_from_url(
     return f"{sanitized}{fmt.extension}"
 
 
-# ---------------------------------------------------------------------------
-# T009: Selenium page acquisition (research.md R2)
-# ---------------------------------------------------------------------------
+# --- T009: Selenium page acquisition (research.md R2) ---
 
 def fetch_article_html() -> str:
     """Fetch the article as rendered HTML using a headless browser.
@@ -310,9 +302,7 @@ def fetch_article_html() -> str:
     ) from last_error
 
 
-# ---------------------------------------------------------------------------
-# T010: Gallery parsing with BeautifulSoup4 (research.md R1)
-# ---------------------------------------------------------------------------
+# --- T010: Gallery parsing with BeautifulSoup4 (research.md R1) ---
 
 def parse_gallery(html: str) -> list[BackgroundImage]:
     """Extract all background images from the rendered article HTML.
@@ -355,9 +345,7 @@ def parse_gallery(html: str) -> list[BackgroundImage]:
     return items
 
 
-# ---------------------------------------------------------------------------
-# T011: Image download with requests (research.md R3/R5/R6)
-# ---------------------------------------------------------------------------
+# --- T011: Image download with requests (research.md R3/R5/R6) ---
 
 def _detect_format(data: bytes) -> Format | None:
     """Detect image format from magic bytes. Returns None if unrecognized."""
@@ -368,7 +356,7 @@ def _detect_format(data: bytes) -> Format | None:
     return None
 
 
-def _download_single(
+def _download_single(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     clean_url: str,
     dest_dir: Path,
     position: int,
@@ -433,7 +421,7 @@ def _download_single(
         raise
 
 
-def download_image(
+def download_image(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     url: str,
     dest_dir: Path,
     position: int = 0,
@@ -490,9 +478,7 @@ def download_image(
     ) from last_error
 
 
-# ---------------------------------------------------------------------------
-# T014: Skip/overwrite logic (FR-007, US2)
-# ---------------------------------------------------------------------------
+# --- T014: Skip/overwrite logic (FR-007, US2) ---
 
 def process_item(
     item: BackgroundImage,
@@ -557,9 +543,7 @@ def process_item(
         return ItemResult(image=item, status=ItemStatus.FAILED, error=msg)
 
 
-# ---------------------------------------------------------------------------
-# Feature 004 US1: Content hashing and hash deduplication (research.md R2)
-# ---------------------------------------------------------------------------
+# --- Feature 004 US1: Content hashing and hash deduplication (research.md R2) ---
 
 HASH_CHUNK_SIZE = 1024 * 1024
 
@@ -644,9 +628,7 @@ def dedup_staged_files(
     return kept, discarded
 
 
-# ---------------------------------------------------------------------------
-# Feature 004 US3: Staging directory lifecycle (research.md R1)
-# ---------------------------------------------------------------------------
+# --- Feature 004 US3: Staging directory lifecycle (research.md R1) ---
 
 # Subfolders whose last modification is older than this are treated as stale
 # leftovers from crashed/interrupted runs and removed at run start. Fresh
@@ -716,9 +698,7 @@ def cleanup_staging(staged_dir: Path) -> None:
             pass
 
 
-# ---------------------------------------------------------------------------
-# Feature 004 US3: Move phase with best-effort semantics (research.md R5)
-# ---------------------------------------------------------------------------
+# --- Feature 004 US3: Move phase with best-effort semantics (research.md R5) ---
 
 def resolve_dest_path(
     filename: str,
@@ -796,7 +776,10 @@ def move_staged_files(
         except FileNotFoundError as e:
             # The staged file vanished before the move (e.g., deleted by a
             # concurrently running instance); report clearly, don't crash.
-            msg = f"{staged_path}: staging file missing at move time or no permission for writing to target {dest}; skipping"
+            msg = (
+                f"{staged_path}: staging file missing at move time "
+                f"or no permission for writing to target {dest}; skipping"
+            )
             print(f"ERROR {msg}", file=sys.stderr)
             failed.append((staged_path, str(e)))
         except Exception as e:  # pylint: disable=broad-exception-caught
@@ -807,9 +790,7 @@ def move_staged_files(
     return moved, failed
 
 
-# ---------------------------------------------------------------------------
-# T012: Main CLI entry point and progress reporting (contracts/cli.md)
-# ---------------------------------------------------------------------------
+# --- T012: Main CLI entry point and progress reporting (contracts/cli.md) ---
 
 HELP_TEXT = """\
 Star Wars Backgrounds Downloader
@@ -832,7 +813,7 @@ Examples:
 """
 
 
-def main() -> int:
+def main() -> int:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """CLI entry point (two-phase pipeline). Returns exit code (0=success, 1=failure)."""
     parser = argparse.ArgumentParser(
         description="Download all Star Wars backgrounds from the StarWars.com article.",

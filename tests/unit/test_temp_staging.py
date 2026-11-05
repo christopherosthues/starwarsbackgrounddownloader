@@ -7,7 +7,6 @@ files whose content hash is already known (FR-001, FR-007, SC-001).
 
 import hashlib
 import io
-import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stderr

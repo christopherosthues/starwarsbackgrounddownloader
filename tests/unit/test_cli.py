@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import starwars_backgrounds as swb
 from starwars_backgrounds import Format, derive_filename, main
-from tests.unit.stub_server import StubServer
+from tests.unit.base_test_case import ServerTestCase
 
 # Fixture HTML with one gallery image using a lumiere CDN URL
 FIXTURE_HTML = """\
@@ -623,13 +623,15 @@ class TestTwoPhaseOutput(unittest.TestCase):
         """Exit 1 when one item fails among many."""
         multi_html = (
             '<html><body>'
-            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/one.jpeg" alt="One"></figure>'
-            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/two.jpeg" alt="Two"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/one.jpeg" '
+            'alt="One"></figure>'
+            '<figure><img src="https://lumiere-a.akamaihd.net/v1/images/two.jpeg" '
+            'alt="Two"></figure>'
             '</body></html>'
         )
         call_count = 0
 
-        def side_effect(url, dest_dir, **kwargs):
+        def side_effect(_, __, ___):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -644,22 +646,8 @@ class TestTwoPhaseOutput(unittest.TestCase):
         self.assertIn("ERROR", stderr)
 
 
-class TestDownloadProgressNotDuplicated(unittest.TestCase):
+class TestDownloadProgressNotDuplicated(ServerTestCase):
     """Regression: the download phase prints exactly one progress line per item."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.server = StubServer.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.stop()
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
-        self.addCleanup(self._tmp.cleanup)
-        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
-        self.output_dir.mkdir(parents=True)
 
     def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
         """Run main() with given args; return (exit_code, stdout, stderr)."""
@@ -697,22 +685,8 @@ class TestDownloadProgressNotDuplicated(unittest.TestCase):
         )
 
 
-class TestDuplicateDiscardLine(unittest.TestCase):
+class TestDuplicateDiscardLine(ServerTestCase):
     """Regression: hash-match discards report which file was discarded (R8)."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.server = StubServer.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.stop()
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
-        self.addCleanup(self._tmp.cleanup)
-        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
-        self.output_dir.mkdir(parents=True)
 
     def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
         """Run main() with given args; return (exit_code, stdout, stderr)."""

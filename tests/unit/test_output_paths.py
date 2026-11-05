@@ -17,6 +17,7 @@ from starwars_backgrounds import (
     process_item,
     resolve_output_dir,
 )
+from tests.unit.base_test_case import ServerTestCase
 from tests.unit.stub_server import JPEG_BYTES, StubServer
 
 
@@ -81,22 +82,8 @@ class TestOutputDirResolution(unittest.TestCase):
         self.assertTrue(resolved.is_absolute())
 
 
-class TestIdempotency(unittest.TestCase):
+class TestIdempotency(ServerTestCase):
     """Verify skip/overwrite behavior for re-runs."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.server = StubServer.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.stop()
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
-        self.addCleanup(self._tmp.cleanup)
-        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
-        self.output_dir.mkdir(parents=True)
 
     def _make_item(self, position=1, title="Tatooine"):
         return BackgroundImage(
