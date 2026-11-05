@@ -785,7 +785,7 @@ def move_staged_files(
         except FileNotFoundError as e:
             # The staged file vanished before the move (e.g., deleted by a
             # concurrently running instance); report clearly, don't crash.
-            msg = f"{staged_path}: staging file missing at move time; skipping"
+            msg = f"{staged_path}: staging file missing at move time or no permission for writing to target {dest}; skipping"
             print(f"ERROR {msg}", file=sys.stderr)
             failed.append((staged_path, str(e)))
         except Exception as e:  # pylint: disable=broad-exception-caught
@@ -888,7 +888,6 @@ def main() -> int:
 
         # Parse gallery
         items = parse_gallery(html)
-        items = items[:1]
         if not items:
             print("ERROR: No backgrounds found in the article.", file=sys.stderr)
             return 1
@@ -987,8 +986,7 @@ def main() -> int:
 
     finally:
         # Cleanup this run's staging subfolder (R1, always runs)
-        # cleanup_staging(staged_dir)
-        pass
+        cleanup_staging(staged_dir)
 
 
 if __name__ == "__main__":
