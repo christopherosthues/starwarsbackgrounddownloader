@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import starwars_backgrounds as swb
 from starwars_backgrounds import Format, derive_filename, main
+from tests.unit.stub_server import StubServer
 
 # Fixture HTML with one gallery image using a lumiere CDN URL
 FIXTURE_HTML = """\
@@ -641,6 +642,117 @@ class TestTwoPhaseOutput(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("ERROR", stderr)
+
+
+class TestDownloadProgressNotDuplicated(unittest.TestCase):
+    """Regression: the download phase prints exactly one progress line per item."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = StubServer.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
+        self.output_dir.mkdir(parents=True)
+
+    def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(swb, "resolve_output_root", return_value=self.output_dir):
+                with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                    with patch("sys.stdout", stdout_buf):
+                        with patch("sys.stderr", stderr_buf):
+                            code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_exactly_one_progress_line_per_item(self):
+        """A full run prints one [i/N] line per item (no duplicated lines)."""
+        html = (
+            '<html><body>'
+            f'<figure><img src="{self.server.base_url}/test.jpeg" alt="Test BG"></figure>'
+            '</body></html>'
+        )
+        with patch.object(swb, "LUMIERE_CDN_PREFIX", self.server.base_url + "/"):
+            with patch.object(swb, "fetch_article_html", return_value=html):
+                code, stdout, _ = self._run_main([])
+
+        self.assertEqual(code, 0)
+        progress_lines = [
+            line for line in stdout.splitlines() if line.startswith("[1/1]")
+        ]
+        self.assertEqual(
+            len(progress_lines),
+            1,
+            f"Expected exactly one progress line per item: {stdout!r}",
+        )
+
+
+class TestDuplicateDiscardLine(unittest.TestCase):
+    """Regression: hash-match discards report which file was discarded (R8)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = StubServer.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.addCleanup(self._tmp.cleanup)
+        self.output_dir = Path(self._tmp.name) / "StarWarsBackground"
+        self.output_dir.mkdir(parents=True)
+
+    def _run_main(self, argv: list[str]) -> tuple[int, str, str]:
+        """Run main() with given args; return (exit_code, stdout, stderr)."""
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        try:
+            with patch.object(swb, "resolve_output_root", return_value=self.output_dir):
+                with patch("sys.argv", ["starwars_backgrounds.py"] + argv):
+                    with patch("sys.stdout", stdout_buf):
+                        with patch("sys.stderr", stderr_buf):
+                            code = main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+        return code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_discard_line_names_the_duplicate_file(self):
+        """Two items with identical content: the second is reported as discarded."""
+        html = (
+            '<html><body>'
+            f'<figure><img src="{self.server.base_url}/one.jpeg" alt="One"></figure>'
+            f'<figure><img src="{self.server.base_url}/two.jpeg" alt="Two"></figure>'
+            '</body></html>'
+        )
+        with patch.object(swb, "LUMIERE_CDN_PREFIX", self.server.base_url + "/"):
+            with patch.object(swb, "fetch_article_html", return_value=html):
+                code, stdout, _ = self._run_main([])
+
+        self.assertEqual(code, 0)
+        discard_lines = [
+            line for line in stdout.splitlines() if "duplicate (hash match)" in line
+        ]
+        self.assertEqual(
+            len(discard_lines),
+            1,
+            f"Expected exactly one discard line: {stdout!r}",
+        )
+        # The discarded item is the second occurrence of the content.
+        self.assertIn("two.jpg", discard_lines[0])
+        summary = next(line for line in stdout.splitlines() if line.startswith("Summary:"))
+        self.assertIn("1 duplicates discarded", summary)
 
 
 class TestDelayOption(unittest.TestCase):

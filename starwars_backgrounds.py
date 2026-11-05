@@ -375,6 +375,7 @@ def _download_single(
     total: int,
     title: str,
     filename: str | None = None,
+    progress: bool = True,
 ) -> tuple[Format, int]:
     """Perform a single download attempt (no retry).
 
@@ -388,6 +389,8 @@ def _download_single(
         total: Total item count.
         title: Item title.
         filename: If given, use this name instead of derive_filename().
+        progress: When False, suppress the per-item progress line (the
+            caller is responsible for reporting it).
     """
     tmp_path: Path | None = None
     try:
@@ -419,7 +422,8 @@ def _download_single(
         tmp_path = None  # Success — no cleanup needed
 
         # Progress reporting (FR-008, SC-005)
-        print(f"[{position}/{total}] {title} -> {final_path} ({len(data)} bytes)")
+        if progress:
+            print(f"[{position}/{total}] {title} -> {final_path} ({len(data)} bytes)")
 
         return fmt, len(data)
 
@@ -437,6 +441,7 @@ def download_image(
     title: str = "",
     filename: str | None = None,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    progress: bool = True,
 ) -> tuple[Format, int]:
     """Download an image from URL with retry logic and atomic write.
 
@@ -453,6 +458,8 @@ def download_image(
         filename: If given, use this name instead of derive_filename().
         delay_seconds: Throttle pause applied after each failed attempt,
             additive to the retry backoff (research.md R6).
+        progress: When False, suppress the per-item progress line (the
+            caller is responsible for reporting it).
 
     Returns:
         Tuple of (detected Format, bytes_written).
@@ -465,7 +472,9 @@ def download_image(
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return _download_single(clean_url, dest_dir, position, total, title, filename)
+            return _download_single(
+                clean_url, dest_dir, position, total, title, filename, progress
+            )
         except requests.exceptions.RequestException as e:
             last_error = e
             if attempt < MAX_ATTEMPTS:
@@ -607,10 +616,11 @@ def dedup_staged_files(
 
     Each staged file is hashed in gallery order. If its hash is in
     seen_hashes (the run-start baseline plus hashes of files kept earlier
-    in this pass), the staged file is deleted and counted as a duplicate
-    discard. Otherwise it is kept, its hash is recorded, and the hash is
-    added to seen_hashes so later same-hash items are discarded — first
-    occurrence wins, under its original link-derived name (spec edge case).
+    in this pass), the staged file is deleted, reported as a duplicate
+    discard on stdout, and counted. Otherwise it is kept, its hash is
+    recorded, and the hash is added to seen_hashes so later same-hash items
+    are discarded — first occurrence wins, under its original link-derived
+    name (spec edge case).
 
     Args:
         staged_paths: Staged files in gallery order.
@@ -625,6 +635,7 @@ def dedup_staged_files(
     for path in staged_paths:
         content_hash = hash_file(path)
         if content_hash in seen_hashes:
+            print(f"{path.name}: duplicate (hash match)")
             path.unlink(missing_ok=True)
             discarded += 1
             continue
@@ -917,6 +928,9 @@ def main() -> int:
                     title=item.title,
                     filename=filename,
                     delay_seconds=args.delay,
+                    # main() prints the line after extension correction so it
+                    # shows the final staged path (one line per item).
+                    progress=False,
                 )
                 # Correct extension to match detected format (R3)
                 correct_filename = derive_filename_from_url(
